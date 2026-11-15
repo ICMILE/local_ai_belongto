@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>B站弹幕实时窗口</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            /* background: #222; */
+            overflow: hidden;
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        }
+        #danmaku-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end; 
+            gap: 6px;
+            padding: 1px;
+            height: 100%;
+            width: 520px;   
+            max-width: 100%;
+            overflow-y: auto; 
+        }
+        .danmaku-item {
+            background: transparent;    
+            color: #fcfcfc;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 32px;
+            line-height: 1.5;
+            word-break: normal;
+            overflow-wrap: break-word;
+            min-width: 0;
+            animation: slideIn 0.3s ease-out;
+            backdrop-filter: blur(4px);
+            max-width: 320px;
+            text-shadow:
+            -2px -2px 0 #000,
+             2px -2px 0 #000,
+            -2px  2px 0 #000,
+             2px  2px 0 #000,
+             0    0   6px rgba(0,0,0,0.8);
+        }
+        .user-name {
+            color: #fcfcfc;
+            font-weight: bold;
+            margin-right: 8px;
+            text-shadow:
+            -2px -2px 0 #000,
+             2px -2px 0 #000,
+            -2px  2px 0 #000,
+             2px  2px 0 #000,
+            0    0   6px rgba(0,0,0,0.8);
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        #status {
+            position: fixed;
+            top: 6px;
+            right: 10px;
+            font-size: 12px;
+            color: #000000;
+        }
+        #status.connected { color: #6f6; }
+        #status.disconnected { color: rgb(0, 84, 253); }
+    </style>
+</head>
+<body>
+    <div id="status" class="disconnected">未连接</div>
+    <div id="danmaku-container"></div>
+
+    <script>
+        const WS_URL = location.protocol === "https:" ? "wss://localhost:7485" : "ws://localhost:7486";
+        const MAX_ITEMS = 80;   // 最多保留的弹幕条数
+        const MAX_AGE_MS = 3 * 60 * 1000; 
+        const container = document.getElementById("danmaku-container");
+        const statusEl = document.getElementById("status");
+
+        let ws = null;
+        let reconnectTimer = null;
+
+        function connect() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log("[弹幕窗口] WebSocket 已连接");
+                statusEl.textContent = "已连接";
+                statusEl.className = "connected";
+            };
+
+            ws.onmessage = (event) => {
+                let data;
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (data.type === "danmaku") {
+                    addDanmaku(data.user, data.content);
+                }
+            };
+
+            ws.onerror = (err) => {
+                console.warn("[弹幕窗口] WebSocket 错误", err);
+            };
+
+            ws.onclose = () => {
+                statusEl.textContent = "未连接（3秒后重连）";
+                statusEl.className = "disconnected";
+                clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(connect, 3000);
+            };
+        }
+
+        function addDanmaku(user, content) {
+            const item = document.createElement("div");
+            item.className = "danmaku-item";
+            item.dataset.ts = Date.now();
+
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "user-name";
+            nameSpan.textContent = user;
+
+            item.appendChild(nameSpan);
+            item.appendChild(document.createTextNode(": "));  
+            item.appendChild(document.createTextNode(content));
+            container.appendChild(item);
+
+            // 超出上限就删掉最旧的
+            while (container.children.length > MAX_ITEMS) {
+                container.removeChild(container.firstChild);
+            }
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        setInterval(() => {
+            const now = Date.now();
+            const items = container.querySelectorAll(".danmaku-item");
+            items.forEach(item => {
+                const ts = parseInt(item.dataset.ts || "0", 10);
+                if (now - ts > MAX_AGE_MS) {
+                    item.remove();
+                }
+            });
+        }, 10000);
+
+        connect();
+    </script>
+</body>
+</html>
